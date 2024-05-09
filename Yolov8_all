@@ -1,0 +1,108 @@
+import cv2
+import torch
+import numpy as np
+import sys
+
+# YOLOv8 modelini yükleme
+model = torch.load('best.pt', map_location='cpu')['model'].float()  # Modeli yükleyin
+model.eval()  # Modeli eval moda alın
+
+# Sınıf isimleri
+classNames = ['balon']  # Sınıf isimlerinizi doğru şekilde tanımlayın
+
+# Kamera açma
+cap = cv2.VideoCapture(0)
+
+def findObjects(predictions, img):
+    bbox_coordinates = []
+    for det in predictions:
+        if len(det) == 5:  # Eğer tahminler 5 değer içeriyorsa
+            x1, y1, x2, y2, confs = det  # cls_id değeri yok
+            # Güven eşiğini her bir conf değeri için kontrol edin
+            for i, conf in enumerate(confs):
+                if conf > 0.5:  # Belirli bir güven eşiği kullanın
+                    # En yüksek güvene sahip tahminin koordinatlarını alın
+                    max_conf_index = torch.argmax(confs)
+                    x1_max = x1[max_conf_index].item()
+                    y1_max = y1[max_conf_index].item()
+                    x2_max = x2[max_conf_index].item()
+                    y2_max = y2[max_conf_index].item()
+
+                    # Dikdörtgeni çiz
+                    cv2.rectangle(img, (int(x1_max), int(y1_max)), (int(x2_max), int(y2_max)), (25, 50, 255), 2)
+
+                    # Dikdörtgenin merkezini kırmızı bir nokta ile işaretle
+                    centerX = int((x1_max + x2_max) // 2)
+                    centerY = int((y1_max + y2_max) // 2)
+                    cv2.circle(img, (centerX, centerY), 3, (0, 0, 255), -1)
+
+                    # Sınıf ismini yazdırma ve konumunu ayarla
+                    text = f'{classNames[0]}'
+                    text_width, text_height = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+                    text_x = int(x2_max) - text_width
+                    text_y = int(y1_max) + text_height
+
+
+                    # Sınıf ismini yaz
+                    cv2.putText(img, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+                    bbox_coordinates.append((int(x1_max), int(y1_max), int(x2_max - x1_max), int(y2_max - y1_max)))
+    return bbox_coordinates
+
+while True:
+    success, img = cap.read()
+    if not success:
+        break
+
+    # Görüntüyü tensöre dönüştürme
+    img_t = torch.from_numpy(img).permute(2, 0, 1).float().div(255.0).unsqueeze(0)
+
+    # YOLOv5 modeliyle nesne tespiti
+    with torch.no_grad():
+        predictions = model(img_t)[0]
+
+        # Görüntünün ortasındaki sabit merkez noktasını çiz, her bir kare için önce nesneler tespit edilir, ardından görüntünün ortasına mavi bir nokta çizilir
+        height, width, _ = img.shape
+        centerX_screen = width // 2
+        centerY_screen = height // 2
+        cv2.circle(img, (centerX_screen, centerY_screen), 4, (255, 0, 0),-1)  # Boyutu artırıldı ve dolu çember olarak çizildi
+
+
+    # Tespit edilen nesneleri gösterme
+    bbox_list = findObjects(predictions, img)
+    print(bbox_list)
+
+    # Tespit edilen nesnenin merkezi ile ekranın merkezi arasındaki mesafeyi hesapla
+    if bbox_list:
+        detected_centerX, detected_centerY = bbox_list[-1][0] + bbox_list[-1][2] // 2, bbox_list[-1][1] + bbox_list[-1][
+            3] // 2
+        distance_x = detected_centerX - centerX_screen
+        distance_y = detected_centerY - centerY_screen
+
+        # Mesafeyi tespit edilen nesnenin sol üst köşesine yazdır
+        cv2.putText(img, f'x={distance_x}', (bbox_list[-1][0], bbox_list[-1][1] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                    (0, 255, 0), 2)
+        cv2.putText(img, f'y={distance_y}', (bbox_list[-1][0], bbox_list[-1][1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                    (0, 255, 0), 2)
+#Bu kod parçasında, cv2.putText fonksiyonu ile mesafeleri yazdırırken, bbox_list[-1][1] - 30 ve bbox_list[-1][1] - 15 koordinatlarını kullanarak tespit edilen nesnenin sol üst köşesinin hemen üstüne yazdırıyoruz. Bu sayede metinler, dikdörtgenin dışında ve üst üste gelmeyecek şekilde konumlandırılır.
+
+        # Tespit edilen nesnenin merkezi ile ekranın merkezi arasındaki mesafeyi hesapla ve yeşil çizgi çiz
+        if bbox_list:
+            detected_centerX, detected_centerY = bbox_list[-1][0] + bbox_list[-1][2] // 2, bbox_list[-1][1] + \
+                                                 bbox_list[-1][3] // 2
+            distance_x = detected_centerX - centerX_screen
+            distance_y = detected_centerY - centerY_screen
+
+            # Yeşil çizgiyi çiz
+            cv2.line(img, (centerX_screen, centerY_screen), (detected_centerX, detected_centerY), (240, 230, 140), 2)
+
+    # Görüntüyü gösterme
+    cv2.imshow('YOLOv8 Object Detection', img)
+
+    # Çıkış için 'q' tuşu
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Kaynakları serbest bırakma
+cap.release()
+cv2.destroyAllWindows()
