@@ -93,6 +93,7 @@ while True:
             distance_x = detected_centerX - centerX_screen
             distance_y = detected_centerY - centerY_screen
 
+#This projects owns Poyraz Baydemir
             # Yeşil çizgiyi çiz
             cv2.line(img, (centerX_screen, centerY_screen), (detected_centerX, detected_centerY), (240, 230, 140), 2)
 
